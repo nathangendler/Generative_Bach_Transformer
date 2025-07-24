@@ -13,7 +13,6 @@ n_embd = 384
 n_head = 12 
 n_layer = 8 
 dropout = 0.2
-# ------------
 
 if torch.cuda.is_available():
     print(f"device: cuda")
@@ -24,13 +23,12 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-# Load the musical tokens from your processed file
 try:
     with open('../tokens/music_tokens.txt', 'r', encoding='utf-8') as f:
         text = f.read()
 except FileNotFoundError:
     try:
-        with open('music_tokens.txt', 'r', encoding='utf-8') as f:
+        with open('../tokens/music_tokens.txt', 'r', encoding='utf-8') as f:
             text = f.read()
         print("Loaded music tokens")
     except FileNotFoundError:
@@ -42,7 +40,6 @@ print(f"Total musical tokens: {len(tokens)}")
 
 unique_tokens = sorted(list(set(tokens)))
 vocab_size = len(unique_tokens)
-
 
 # create a mapping from tokens to integers
 stoi = { token:i for i,token in enumerate(unique_tokens) }
@@ -82,14 +79,13 @@ def estimate_loss():
     return out
 
 class Head(nn.Module):
-
     def __init__(self, head_size):
         super().__init__()
+        self.head_size = head_size 
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -98,7 +94,7 @@ class Head(nn.Module):
         B,T,C = x.shape
         k = self.key(x)  
         q = self.query(x) 
-        wei = q @ k.transpose(-2,-1) * head_size**-0.5 
+        wei = q @ k.transpose(-2,-1) * self.head_size**-0.5 
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) 
         wei = F.softmax(wei, dim=-1) 
         wei = self.dropout(wei)
@@ -107,7 +103,6 @@ class Head(nn.Module):
         return out
 
 class MultiHeadAttention(nn.Module):
-
     def __init__(self, num_heads, head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
@@ -120,7 +115,6 @@ class MultiHeadAttention(nn.Module):
         return out
 
 class FeedForward(nn.Module):
-
     def __init__(self, n_embd):
         super().__init__()
         self.net = nn.Sequential(
@@ -134,7 +128,6 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Block(nn.Module):
-
     def __init__(self, n_embd, n_head):
         # n_embd: embedding dimension, n_head: the number of heads we'd like
         super().__init__()
@@ -152,7 +145,6 @@ class Block(nn.Module):
         return x
 
 class MusicalGPTModel(nn.Module):
-
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
@@ -206,9 +198,7 @@ m = model.to(device)
 total_params = sum(p.numel() for p in m.parameters())
 print(f"Model created with {total_params/1e6:.1f}M parameters")
 
-
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
-
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_iters)
 
 print("Training progress:")
@@ -218,133 +208,56 @@ patience_counter = 0
 patience = 5  
 
 for iter in range(max_iters):
-    # every once in a while evaluate the loss on train and val sets
     if iter % eval_interval == 0 or iter == max_iters - 1:
         losses = estimate_loss()
         current_lr = optimizer.param_groups[0]['lr']
         
         print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, lr {current_lr:.2e}")
         
-        # GPU memory monitoring
-        if torch.cuda.is_available():
-            memory_used = torch.cuda.memory_allocated() / 1e6
-            memory_cached = torch.cuda.memory_reserved() / 1e6
-            print(f"         GPU memory: {memory_used:.1f}MB used, {memory_cached:.1f}MB cached")
-        
         # Early stopping logic
         if losses['val'] < best_val_loss:
             best_val_loss = losses['val']
             patience_counter = 0
-            # Save best model
-            try:
-                torch.save(model.state_dict(), '../models/bach_model.pth')
-            except:
-                torch.save(model.state_dict(), 'bach_model.pth')
+            torch.save(model.state_dict(), '../models/bach_model.pth')
         else:
             patience_counter += 1
             if patience_counter >= patience:
                 print(f"Early stopping at iteration {iter} (no improvement for {patience} evaluations)")
                 break
 
-    # sample a batch of data
     xb, yb = get_batch('train')
 
-    # evaluate the loss
     logits, loss = model(xb, yb)
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     
-    # Gradient clipping for stable training
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     
     optimizer.step()
-    scheduler.step()  # Update learning rate
-    
-    # Clear GPU cache periodically
+    scheduler.step()
     if torch.cuda.is_available() and iter % 100 == 0:
         torch.cuda.empty_cache()
 
-print("\nTraining complete! Generating new Bach-style compositions...")
+print("\nTraining complete")
 
-# Clear GPU memory before generation
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
 
-# Load best model for generation
-try:
-    model.load_state_dict(torch.load('../models/bach_model.pth'))
-    print("Loaded best model for generation")
-except:
-    try:
-        model.load_state_dict(torch.load('bach_model.pth'))
-        print("Loaded best model for generation")
-    except:
-        print("Using final model for generation")
 
-model.eval()  # Set to evaluation mode
+model.load_state_dict(torch.load('../models/bach_model.pth'))
+model.eval()
 
-# Generate different length pieces
-lengths = [50, 100, 200]
-for i, length in enumerate(lengths, 1):
-    context = torch.zeros((1, 1), dtype=torch.long, device=device)
-    generated_tokens = model.generate(context, max_new_tokens=length)[0].tolist()
-    generated_music = decode(generated_tokens)
-    
-    print(f"\n=== GENERATED COMPOSITION #{i} ({length} tokens) ===")
-    
-    # Show first and last few tokens for readability
-    tokens_list = generated_music.split()
-    if len(tokens_list) <= 20:
-        print(generated_music)
-    else:
-        first_10 = ' '.join(tokens_list[:10])
-        last_10 = ' '.join(tokens_list[-10:])
-        print(f"Start: {first_10}")
-        print(f"  ... ({len(tokens_list)-20} more tokens) ...")
-        print(f"End:   {last_10}")
-    
-    # Save each composition
-    filename = f'../generated/generated_bach_{length}_tokens.txt'
-    try:
-        with open(filename, 'w') as f:
-            f.write(generated_music)
-        print(f"Saved to {filename}")
-    except:
-        filename = f'generated_bach_{length}_tokens.txt'
-        with open(filename, 'w') as f:
-            f.write(generated_music)
-        print(f"Saved to {filename}")
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
+generated_tokens = model.generate(context, max_new_tokens=200)[0].tolist()
+generated_music = decode(generated_tokens)
 
-# Save the trained model
-try:
-    torch.save(model.state_dict(), '../models/bach_gpt_model.pth')
-    print(f"\nModel saved to '../models/bach_gpt_model.pth'")
-except:
-    torch.save(model.state_dict(), 'bach_gpt_model.pth')
-    print(f"\nModel saved to 'bach_gpt_model.pth'")
+with open('../generated/generated_music.txt', 'w') as f:
+        f.write(generated_music)
+print(f"\nSaved to '../generated/generated_music.txt'")
+torch.save(model.state_dict(), '../models/bach_gpt_model.pth')
+print(f"Model saved to '../models/bach_gpt_model.pth'")
 
-print("\nYour Advanced Bach AI Composer is ready!")
-print("The model has learned Bach's musical patterns and can generate new compositions.")
-
-# Final GPU memory cleanup
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
     final_memory = torch.cuda.memory_allocated() / 1e6
     print(f"Final GPU memory usage: {final_memory:.1f} MB")
-
-print("Run this script again to generate more unique pieces!")
-
-# Optional: Generate a really long piece
-print(f"\nGenerating an extended composition (500 tokens)...")
-context = torch.zeros((1, 1), dtype=torch.long, device=device)
-long_piece = model.generate(context, max_new_tokens=500)[0].tolist()
-long_music = decode(long_piece)
-
-try:
-    with open('../generated/bach_long_composition.txt', 'w') as f:
-        f.write(long_music)
-    print(f"Extended composition saved to '../generated/bach_long_composition.txt'")
-except:
-    with open('bach_long_composition.txt', 'w') as f:
-        f.write(long_music)
-    print(f"Extended composition saved to 'bach_long_composition.txt'")
