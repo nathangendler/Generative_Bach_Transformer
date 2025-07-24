@@ -1,11 +1,14 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
+# Training parameters
 batch_size = 64 
 block_size = 256 
-max_iters = 5000
-eval_interval = 500
+epochs = 3  # Changed from max_iters to epochs
+eval_interval = 5  # Evaluate every 5 epochs
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
@@ -26,14 +29,21 @@ if torch.cuda.is_available():
 try:
     with open('../tokens/music_tokens.txt', 'r', encoding='utf-8') as f:
         text = f.read()
+    print("Loaded music tokens")
 except FileNotFoundError:
     try:
-        with open('../tokens/music_tokens.txt', 'r', encoding='utf-8') as f:
+        with open('tokens/music_tokens.txt', 'r', encoding='utf-8') as f:
             text = f.read()
-        print("Loaded music tokens")
+        print("Loaded music tokens from root directory")
     except FileNotFoundError:
-        print("Could not find music tokens file")
-        exit(1)
+        try:
+            with open('music_tokens.txt', 'r', encoding='utf-8') as f:
+                text = f.read()
+            print("Loaded music tokens from current directory")
+        except FileNotFoundError:
+            print("Could not find music tokens file")
+            print("Checked: ../tokens/music_tokens.txt, tokens/music_tokens.txt, and music_tokens.txt")
+            exit(1)
 
 tokens = text.split()
 print(f"Total musical tokens: {len(tokens)}")
@@ -56,27 +66,48 @@ val_data = data[n:]
 print(f"Training data size: {len(train_data)} tokens")
 print(f"Validation data size: {len(val_data)} tokens")
 
-def get_batch(split):
-    data = train_data if split == 'train' else val_data
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([data[i:i+block_size] for i in ix])
-    y = torch.stack([data[i+1:i+block_size+1] for i in ix])
-    x, y = x.to(device), y.to(device)
-    return x, y
+# Create proper datasets and dataloaders
+def create_sequences(data, block_size):
+    """Create input-target sequence pairs"""
+    sequences = []
+    targets = []
+    for i in range(len(data) - block_size):
+        sequences.append(data[i:i+block_size])
+        targets.append(data[i+1:i+block_size+1])
+    return torch.stack(sequences), torch.stack(targets)
+
+# Create training and validation datasets
+train_sequences, train_targets = create_sequences(train_data, block_size)
+val_sequences, val_targets = create_sequences(val_data, block_size)
+
+train_dataset = TensorDataset(train_sequences, train_targets)
+val_dataset = TensorDataset(val_sequences, val_targets)
+
+train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+print(f"Training sequences: {len(train_dataset):,}")
+print(f"Validation sequences: {len(val_dataset):,}")
 
 @torch.no_grad()
-def estimate_loss():
-    out = {}
+def validate_model(model, val_dataloader, device):
+    """Validation function"""
     model.eval()
-    for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            X, Y = get_batch(split)
-            logits, loss = model(X, Y)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
+    total_val_loss = 0.0
+    num_val_batches = 0
+    
+    for X, Y in val_dataloader:
+        X, Y = X.to(device), Y.to(device)
+        logits, loss = model(X, Y)
+        total_val_loss += loss.item()
+        num_val_batches += 1
+        
+        # Limit validation batches for speed
+        if num_val_batches >= eval_iters:
+            break
+    
     model.train()
-    return out
+    return total_val_loss / num_val_batches
 
 class Head(nn.Module):
     def __init__(self, head_size):
@@ -89,8 +120,6 @@ class Head(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        # input of size (batch, time-step, channels)
-        # output of size (batch, time-step, head size)
         B,T,C = x.shape
         k = self.key(x)  
         q = self.query(x) 
@@ -129,7 +158,6 @@ class FeedForward(nn.Module):
 
 class Block(nn.Module):
     def __init__(self, n_embd, n_head):
-        # n_embd: embedding dimension, n_head: the number of heads we'd like
         super().__init__()
         head_size = n_embd // n_head
         self.sa = MultiHeadAttention(n_head, head_size)
@@ -150,7 +178,7 @@ class MusicalGPTModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
-        self.ln_f = nn.LayerNorm(n_embd) # final layer norm
+        self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
         self.apply(self._init_weights)
 
@@ -167,7 +195,7 @@ class MusicalGPTModel(nn.Module):
 
         tok_emb = self.token_embedding_table(idx)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))
-        x = tok_emb + pos_emb  # Add token and positional embeddings
+        x = tok_emb + pos_emb
         x = self.blocks(x) 
         x = self.ln_f(x) 
         logits = self.lm_head(x) 
@@ -196,68 +224,111 @@ model = MusicalGPTModel()
 m = model.to(device)
 
 total_params = sum(p.numel() for p in m.parameters())
-print(f"Model created with {total_params/1e6:.1f}M parameters")
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_iters)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-print("Training progress:")
+print(f"Model parameters: {total_params/1e6:.1f}M")
 
 best_val_loss = float('inf')
 patience_counter = 0
-patience = 5  
+patience = 10 
+train_loss_history = []
+val_loss_history = []
+print(epochs)
+print("\nStarting training")
 
-for iter in range(max_iters):
-    if iter % eval_interval == 0 or iter == max_iters - 1:
-        losses = estimate_loss()
-        current_lr = optimizer.param_groups[0]['lr']
+for epoch in range(epochs):
+    model.train()
+    epoch_train_loss = 0.0
+    num_train_batches = 0
+    
+    pbar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+    
+    for batch_idx, (X, Y) in enumerate(pbar):
+        X, Y = X.to(device), Y.to(device)
         
-        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, lr {current_lr:.2e}")
+        logits, loss = model(X, Y)
         
-        # Early stopping logic
-        if losses['val'] < best_val_loss:
-            best_val_loss = losses['val']
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        
+        epoch_train_loss += loss.item()
+        num_train_batches += 1
+        
+        pbar.set_postfix(loss=loss.item())
+    
+    scheduler.step()
+    avg_train_loss = epoch_train_loss / num_train_batches
+    train_loss_history.append(avg_train_loss)
+    
+    if (epoch + 1) % eval_interval == 0 or epoch == epochs - 1:
+        val_loss = validate_model(model, val_dataloader, device)
+        val_loss_history.append(val_loss)
+        current_lr = scheduler.get_last_lr()[0]
+        
+        print(f"\nEpoch {epoch+1}/{epochs}")
+        print(f"Train Loss: {avg_train_loss:.6f} | Val Loss: {val_loss:.6f}")
+        print(f"Learning Rate: {current_lr:.2e}")
+        
+        if torch.cuda.is_available():
+            memory_used = torch.cuda.memory_allocated() / 1e6
+            memory_cached = torch.cuda.memory_reserved() / 1e6
+            print(f"GPU Memory: {memory_used:.1f}MB used, {memory_cached:.1f}MB cached")
+        
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             patience_counter = 0
-            torch.save(model.state_dict(), '../models/bach_model.pth')
+            try:
+                torch.save(model.state_dict(), '../models/bach_model.pth')
+                print("✓ Best model saved")
+            except:
+                torch.save(model.state_dict(), 'models/bach_model.pth')
+                print("✓ Best model saved")
         else:
             patience_counter += 1
+            print(f"No improvement for {patience_counter}/{patience} epochs")
             if patience_counter >= patience:
-                print(f"Early stopping at iteration {iter} (no improvement for {patience} evaluations)")
+                print(f"Early stopping at epoch {epoch+1}")
                 break
-
-    xb, yb = get_batch('train')
-
-    logits, loss = model(xb, yb)
-    optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    
-    optimizer.step()
-    scheduler.step()
-    if torch.cuda.is_available() and iter % 100 == 0:
+        
+    if torch.cuda.is_available() and epoch % 10 == 0:
         torch.cuda.empty_cache()
 
-print("\nTraining complete")
+print(f"Total epochs trained: {len(train_loss_history)}")
+print(f"Best validation loss: {best_val_loss:.6f}")
 
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
 
+try:
+    model.load_state_dict(torch.load('../models/bach_model.pth'))
+except:
+    model.load_state_dict(torch.load('models/bach_model.pth'))
 
-model.load_state_dict(torch.load('../models/bach_model.pth'))
 model.eval()
 
+
+print(f"\nGenerating sequence")
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 generated_tokens = model.generate(context, max_new_tokens=200)[0].tolist()
 generated_music = decode(generated_tokens)
 
-with open('../generated/generated_music.txt', 'w') as f:
+
+try:
+    with open('/generated/generated_music.txt', 'w') as f:
         f.write(generated_music)
-print(f"\nSaved to '../generated/generated_music.txt'")
-torch.save(model.state_dict(), '../models/bach_gpt_model.pth')
-print(f"Model saved to '../models/bach_gpt_model.pth'")
+except:
+    with open('generated_music.txt', 'w') as f:
+        f.write(generated_music)
+
+try:
+    torch.save(model.state_dict(), '/models/bach_gpt_model.pth')
+except:
+    torch.save(model.state_dict(), 'bach_gpt_model.pth')
+
 
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
-    final_memory = torch.cuda.memory_allocated() / 1e6
-    print(f"Final GPU memory usage: {final_memory:.1f} MB")

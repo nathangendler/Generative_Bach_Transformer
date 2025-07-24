@@ -111,7 +111,6 @@ class TokensToMusicXMLConverter:
         return events
     
     def create_musicxml(self, events: List[Dict[str, Any]], title: str = "AI Generated Music") -> str:
-        """Convert musical events to MusicXML format"""
         
         # Create root element
         score = ET.Element('score-partwise', version="4.0")
@@ -149,16 +148,12 @@ class TokensToMusicXMLConverter:
         instrument_name = ET.SubElement(score_instrument, 'instrument-name')
         instrument_name.text = "Piano"
         
-        # Create part
         part = ET.SubElement(score, 'part', id="P1")
-        
-        # Group events into measures (assume 4/4 time, 96 divisions per measure)
         measures = self.group_into_measures(events)
         
         for measure_num, measure_events in enumerate(measures, 1):
             measure = ET.SubElement(part, 'measure', number=str(measure_num))
             
-            # Add attributes for first measure
             if measure_num == 1:
                 attributes = ET.SubElement(measure, 'attributes')
                 
@@ -166,7 +161,7 @@ class TokensToMusicXMLConverter:
                 divisions = ET.SubElement(attributes, 'divisions')
                 divisions.text = str(self.divisions)
                 
-                # Key signature (find first key signature or use default)
+                # Key signature
                 key_sig = next((e for e in events if e['type'] == 'key_signature'), None)
                 if key_sig:
                     key = ET.SubElement(attributes, 'key')
@@ -191,15 +186,13 @@ class TokensToMusicXMLConverter:
                     beats.text = str(self.default_time_beats)
                     beat_type = ET.SubElement(time, 'beat-type')
                     beat_type.text = str(self.default_time_beat_type)
-                
-                # Clef
+            
                 clef = ET.SubElement(attributes, 'clef')
                 sign = ET.SubElement(clef, 'sign')
                 sign.text = "G"
                 line = ET.SubElement(clef, 'line')
                 line.text = "2"
             
-            # Add notes and rests
             for event in measure_events:
                 if event['type'] == 'note':
                     self.add_note_to_measure(measure, event)
@@ -209,7 +202,6 @@ class TokensToMusicXMLConverter:
         return self.prettify_xml(score)
     
     def group_into_measures(self, events: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        """Group musical events into measures based on duration"""
         measures = []
         current_measure = []
         current_duration = 0
@@ -217,7 +209,6 @@ class TokensToMusicXMLConverter:
         
         for event in events:
             if event['type'] in ['note', 'rest']:
-                # If adding this event would exceed measure length, start new measure
                 if current_duration + event['duration'] > measure_length and current_measure:
                     measures.append(current_measure)
                     current_measure = []
@@ -226,23 +217,18 @@ class TokensToMusicXMLConverter:
                 current_measure.append(event)
                 current_duration += event['duration']
                 
-                # If measure is exactly full, start new measure
                 if current_duration >= measure_length:
                     measures.append(current_measure)
                     current_measure = []
                     current_duration = 0
         
-        # Add any remaining events
         if current_measure:
             measures.append(current_measure)
         
         return measures
     
     def add_note_to_measure(self, measure: ET.Element, note_event: Dict[str, Any]):
-        """Add a note element to a measure"""
         note = ET.SubElement(measure, 'note')
-        
-        # Pitch
         pitch = ET.SubElement(note, 'pitch')
         step = ET.SubElement(pitch, 'step')
         step.text = note_event['step']
@@ -250,19 +236,12 @@ class TokensToMusicXMLConverter:
         if note_event['alter'] != 0:
             alter = ET.SubElement(pitch, 'alter')
             alter.text = str(note_event['alter'])
-        
         octave = ET.SubElement(pitch, 'octave')
         octave.text = str(note_event['octave'])
-        
-        # Duration
         duration = ET.SubElement(note, 'duration')
         duration.text = str(note_event['duration'])
-        
-        # Voice
         voice = ET.SubElement(note, 'voice')
         voice.text = "1"
-        
-        # Type
         note_type = ET.SubElement(note, 'type')
         type_map = {
             "16th": "16th",
@@ -273,7 +252,6 @@ class TokensToMusicXMLConverter:
         }
         note_type.text = type_map.get(note_event['duration_type'], "quarter")
         
-        # Stem direction (basic logic)
         if note_event['octave'] >= 5:
             stem = ET.SubElement(note, 'stem')
             stem.text = "down"
@@ -282,21 +260,12 @@ class TokensToMusicXMLConverter:
             stem.text = "up"
     
     def add_rest_to_measure(self, measure: ET.Element, rest_event: Dict[str, Any]):
-        """Add a rest element to a measure"""
         note = ET.SubElement(measure, 'note')
-        
-        # Rest
         rest = ET.SubElement(note, 'rest')
-        
-        # Duration
         duration = ET.SubElement(note, 'duration')
         duration.text = str(rest_event['duration'])
-        
-        # Voice
         voice = ET.SubElement(note, 'voice')
         voice.text = "1"
-        
-        # Type
         note_type = ET.SubElement(note, 'type')
         type_map = {
             "16th": "16th",
@@ -308,25 +277,21 @@ class TokensToMusicXMLConverter:
         note_type.text = type_map.get(rest_event['duration_type'], "quarter")
     
     def prettify_xml(self, elem: ET.Element) -> str:
-        """Return a pretty-printed XML string"""
         rough_string = ET.tostring(elem, 'unicode')
         reparsed = minidom.parseString(rough_string)
         pretty = reparsed.toprettyxml(indent="  ")
         
-        # Add XML declaration and DOCTYPE
         lines = pretty.split('\n')
-        # Remove the auto-generated XML declaration
         if lines[0].startswith('<?xml'):
             lines = lines[1:]
         
-        # Add proper declaration and DOCTYPE
         result = ['<?xml version="1.0" encoding="UTF-8"?>']
         result.append('<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">')
         result.extend(line for line in lines if line.strip())
         
         return '\n'.join(result)
     
-    def convert_file(self, input_file: str, output_file: str = None, title: str = None) -> str:
+    def convert_file(self, input_file, output_file, title) -> str:
         """Convert a token file to MusicXML"""
         try:
             with open(input_file, 'r', encoding='utf-8') as f:
@@ -341,7 +306,6 @@ class TokensToMusicXMLConverter:
         if not title:
             title = "Generated Bach"
         
-        # Parse tokens and convert to MusicXML
         events = self.parse_tokens(tokens_text)
         
         if not events:
@@ -349,7 +313,6 @@ class TokensToMusicXMLConverter:
         
         musicxml = self.create_musicxml(events, title)
         
-        # Save to file
         try:
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(musicxml)
@@ -358,120 +321,36 @@ class TokensToMusicXMLConverter:
             return f"Error saving file: {e}"
 
 def main():
-    """Main function to convert tokens to MusicXML"""
     converter = TokensToMusicXMLConverter()
     
-    # Look for your specific file first
-    target_file = 'simple_generated_music.txt'
+    target_file = 'generated_music.txt'
     possible_locations = [
         f'../generated/{target_file}',
         target_file,
         f'./{target_file}'
     ]
     
-    print("🎼 Converting simple_generated_music.txt to MusicXML")
-    print("=" * 50)
-    
-    # Find your specific file
     found_file = None
     for file_path in possible_locations:
         if os.path.exists(file_path):
             found_file = file_path
-            print(f"✓ Found target file: {file_path}")
+            print(f"Found target file: {file_path}")
             break
     
     if not found_file:
-        print(f"❌ Could not find {target_file}!")
-        print("Checked these locations:")
-        for location in possible_locations:
-            print(f"  ✗ {location}")
-        print(f"\nPlease make sure {target_file} exists in one of these locations.")
+        print(f"Could not find {target_file}")
         return
-    
-    print(f"\n🎵 Converting {target_file} to MusicXML...")
-    
-    # Create output filename
+    print(f"Converting {target_file} to XML")
     output_file = found_file.replace('.txt', '.xml')
     title = "Generated Bach"
-    
-    # Convert the file
     result = converter.convert_file(found_file, output_file, title)
     print(f"\nResult: {result}")
     
     if result.startswith("Success"):
-        print(f"\n✅ Conversion successful!")
-        print(f"📁 Input:  {found_file}")
-        print(f"📁 Output: {output_file}")
-        
-        # Show file size and quick preview
-        try:
-            with open(found_file, 'r') as f:
-                tokens = f.read().split()
-            with open(output_file, 'r') as f:
-                xml_content = f.read()
-            
-            print(f"\n📊 Conversion summary:")
-            print(f"  🎵 Tokens processed: {len(tokens)}")
-            print(f"  📄 MusicXML size: {len(xml_content):,} characters")
-            print(f"  🎼 Musical events: {len([t for t in tokens if t.startswith(('NOTE_', 'REST_'))])}")
-            
-            # Show first few tokens for verification
-            print(f"\n🎯 First 10 tokens converted:")
-            for i, token in enumerate(tokens[:10], 1):
-                print(f"  {i:2d}: {token}")
-            if len(tokens) > 10:
-                print(f"  ... and {len(tokens)-10} more")
-            
-        except Exception as e:
-            print(f"  (Could not read file details: {e})")
-        
-        print(f"\n🎼 Next steps:")
-        print(f"  1. Open {output_file} in MuseScore (free download)")
-        print(f"  2. Listen to your AI Bach composition!")
-        print(f"  3. Export as MP3/PDF if you like it")
-        
+        print(f"Conversion successful") 
     else:
-        print(f"\n❌ Conversion failed!")
-        print("Common issues:")
-        print("  • File might be empty")
-        print("  • Invalid token format")
-        print("  • File permission issues")
+        print(f"Conversion failed")
         
-        # Try to show file content for debugging
-        try:
-            with open(found_file, 'r') as f:
-                content = f.read()
-            print(f"\n🔍 File content preview (first 200 chars):")
-            print(f"'{content[:200]}...'")
-        except:
-            print("  • Could not read file content")
-    
-    # Also check for other generated files
-    print(f"\n🔍 Looking for other generated music files...")
-    other_files = [
-        '../generated/generated_bach_50_tokens.txt',
-        '../generated/generated_bach_100_tokens.txt', 
-        '../generated/generated_bach_200_tokens.txt',
-        '../generated/bach_long_composition.txt',
-        'generated_bach_100_tokens.txt'
-    ]
-    
-    found_others = []
-    for file_path in other_files:
-        if os.path.exists(file_path) and file_path != found_file:
-            found_others.append(file_path)
-    
-    if found_others:
-        print(f"Found {len(found_others)} other generated music files:")
-        for file_path in found_others:
-            print(f"  ✓ {file_path}")
-        print(f"\nTo convert these too, run:")
-        print(f"converter = TokensToMusicXMLConverter()")
-        for file_path in found_others:
-            output_name = file_path.replace('.txt', '.xml')
-            print(f"converter.convert_file('{file_path}', '{output_name}')")
-    else:
-        print("No other generated music files found.")
 
 if __name__ == "__main__":
     main()
