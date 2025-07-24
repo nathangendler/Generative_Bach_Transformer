@@ -218,7 +218,7 @@ def main():
     try:
         print("Current working directory:", os.getcwd())
         paste_dir_paths = [
-            './Transformer/data_file',   
+            '../data_file',   
 
         ]
         
@@ -345,17 +345,17 @@ def main():
                 print(f"  {i:2d}: {token}")
         
         # Save combined tokens to file
-        output_file = './Transformer/music_tokens.txt'
+        output_file = '../tokens/music_tokens.txt'
         try:
             with open(output_file, 'w') as f:
                 f.write(combined_result)
-            print(f"\n✅ All {total_tokens:,} combined tokens saved to '{output_file}'")
+            print(f"\nAll {total_tokens:,} combined tokens saved to '{output_file}'")
         except:
-            # Fallback to current directory if Transformer folder doesn't exist
+            # Fallback to current directory if tokens folder doesn't exist
             output_file = 'music_tokens.txt'
             with open(output_file, 'w') as f:
                 f.write(combined_result)
-            print(f"\n✅ All {total_tokens:,} combined tokens saved to '{output_file}'")
+            print(f"\nAll {total_tokens:,} combined tokens saved to '{output_file}'")
         
         print(f"\n🎼 Ready for transformer training with {len(successfully_processed)} Bach pieces!")
         print("Your AI will now learn from multiple Bach compositions for richer musical patterns!")
@@ -370,7 +370,7 @@ def main():
             # Try to save whatever tokens we managed to process
             if 'all_tokens' in locals() and all_tokens:
                 combined_result = ' '.join(all_tokens)
-                output_file = './Transformer/music_tokens_partial.txt'
+                output_file = '../tokens/music_tokens_partial.txt'
                 try:
                     with open(output_file, 'w') as f:
                         f.write(combined_result)

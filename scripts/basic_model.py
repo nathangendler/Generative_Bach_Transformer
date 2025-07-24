@@ -16,9 +16,9 @@ torch.manual_seed(1337)
 
 # Load the musical tokens processed file
 try:
-    with open('./Transformer/music_tokens.txt', 'r', encoding='utf-8') as f:
+    with open('../tokens/music_tokens.txt', 'r', encoding='utf-8') as f:
         text = f.read()
-    print("✅ Loaded music_tokens.txt")
+    print("Loaded music_tokens.txt")
 except FileNotFoundError:
     try:
         with open('music_tokens.txt', 'r', encoding='utf-8') as f:
@@ -150,17 +150,17 @@ print(generated_music)
 
 # Save the generated music
 try:
-    with open('./Transformer/simple_generated_music.txt', 'w') as f:
+    with open('../generated/simple_generated_music.txt', 'w') as f:
         f.write(generated_music)
-    print(f"\n generated music saved to './Transformer/simple_generated_music.txt'")
+    print(f"\n generated music saved to '../generated/simple_generated_music.txt'")
 except:
     with open('simple_generated_music.txt', 'w') as f:
         f.write(generated_music)
     print(f"\n generated music saved to 'simple_generated_music.txt'")
 
 try:
-    torch.save(model.state_dict(), './Transformer/simple_music_model.pth')
-    print(f" model saved to './Transformer/simple_music_model.pth'")
+    torch.save(model.state_dict(), '../models/simple_music_model.pth')
+    print(f" model saved to '../models/simple_music_model.pth'")
 except:
     torch.save(model.state_dict(), 'simple_music_model.pth')
     print(f" model saved to 'simple_music_model.pth'")

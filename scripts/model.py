@@ -26,7 +26,7 @@ if torch.cuda.is_available():
 
 # Load the musical tokens from your processed file
 try:
-    with open('./Transformer/music_tokens.txt', 'r', encoding='utf-8') as f:
+    with open('../tokens/music_tokens.txt', 'r', encoding='utf-8') as f:
         text = f.read()
 except FileNotFoundError:
     try:
@@ -98,7 +98,7 @@ class Head(nn.Module):
         B,T,C = x.shape
         k = self.key(x)  
         q = self.query(x) 
-        wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 
+        wei = q @ k.transpose(-2,-1) * head_size**-0.5 
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) 
         wei = F.softmax(wei, dim=-1) 
         wei = self.dropout(wei)
@@ -143,10 +143,12 @@ class Block(nn.Module):
         self.ffwd = FeedForward(n_embd)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x):
-        x = x + self.sa(self.ln1(x))
-        x = x + self.ffwd(self.ln2(x))
+        x = x + self.dropout1(self.sa(self.ln1(x)))
+        x = x + self.dropout2(self.ffwd(self.ln2(x)))
         return x
 
 class MusicalGPTModel(nn.Module):
@@ -173,6 +175,7 @@ class MusicalGPTModel(nn.Module):
 
         tok_emb = self.token_embedding_table(idx)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))
+        x = tok_emb + pos_emb  # Add token and positional embeddings
         x = self.blocks(x) 
         x = self.ln_f(x) 
         logits = self.lm_head(x) 
@@ -234,9 +237,9 @@ for iter in range(max_iters):
             patience_counter = 0
             # Save best model
             try:
-                torch.save(model.state_dict(), './Transformer/bach_model.pth')
+                torch.save(model.state_dict(), '../models/bach_model.pth')
             except:
-                torch.save(model.state_dict(), 'best_bach_model.pth')
+                torch.save(model.state_dict(), 'bach_model.pth')
         else:
             patience_counter += 1
             if patience_counter >= patience:
@@ -261,7 +264,7 @@ for iter in range(max_iters):
     if torch.cuda.is_available() and iter % 100 == 0:
         torch.cuda.empty_cache()
 
-print("\n🎵 Training complete! Generating new Bach-style compositions...")
+print("\nTraining complete! Generating new Bach-style compositions...")
 
 # Clear GPU memory before generation
 if torch.cuda.is_available():
@@ -269,14 +272,14 @@ if torch.cuda.is_available():
 
 # Load best model for generation
 try:
-    model.load_state_dict(torch.load('./Transformer/best_bach_model.pth'))
-    print("✅ Loaded best model for generation")
+    model.load_state_dict(torch.load('../models/bach_model.pth'))
+    print("Loaded best model for generation")
 except:
     try:
-        model.load_state_dict(torch.load('best_bach_model.pth'))
-        print("✅ Loaded best model for generation")
+        model.load_state_dict(torch.load('bach_model.pth'))
+        print("Loaded best model for generation")
     except:
-        print("ℹ️  Using final model for generation")
+        print("Using final model for generation")
 
 model.eval()  # Set to evaluation mode
 
@@ -284,7 +287,7 @@ model.eval()  # Set to evaluation mode
 lengths = [50, 100, 200]
 for i, length in enumerate(lengths, 1):
     context = torch.zeros((1, 1), dtype=torch.long, device=device)
-    generated_tokens = m.generate(context, max_new_tokens=length)[0].tolist()
+    generated_tokens = model.generate(context, max_new_tokens=length)[0].tolist()
     generated_music = decode(generated_tokens)
     
     print(f"\n=== GENERATED COMPOSITION #{i} ({length} tokens) ===")
@@ -301,26 +304,26 @@ for i, length in enumerate(lengths, 1):
         print(f"End:   {last_10}")
     
     # Save each composition
-    filename = f'./Transformer/generated_bach_{length}_tokens.txt'
+    filename = f'../generated/generated_bach_{length}_tokens.txt'
     try:
         with open(filename, 'w') as f:
             f.write(generated_music)
-        print(f"✅ Saved to {filename}")
+        print(f"Saved to {filename}")
     except:
         filename = f'generated_bach_{length}_tokens.txt'
         with open(filename, 'w') as f:
             f.write(generated_music)
-        print(f"✅ Saved to {filename}")
+        print(f"Saved to {filename}")
 
 # Save the trained model
 try:
-    torch.save(model.state_dict(), './Transformer/bach_gpt_model.pth')
-    print(f"\n✅ Model saved to './Transformer/bach_gpt_model.pth'")
+    torch.save(model.state_dict(), '../models/bach_gpt_model.pth')
+    print(f"\nModel saved to '../models/bach_gpt_model.pth'")
 except:
     torch.save(model.state_dict(), 'bach_gpt_model.pth')
-    print(f"\n✅ Model saved to 'bach_gpt_model.pth'")
+    print(f"\nModel saved to 'bach_gpt_model.pth'")
 
-print("\n🎼 Your Advanced Bach AI Composer is ready!")
+print("\nYour Advanced Bach AI Composer is ready!")
 print("The model has learned Bach's musical patterns and can generate new compositions.")
 
 # Final GPU memory cleanup
@@ -332,16 +335,16 @@ if torch.cuda.is_available():
 print("Run this script again to generate more unique pieces!")
 
 # Optional: Generate a really long piece
-print(f"\n🎶 Generating an extended composition (500 tokens)...")
+print(f"\nGenerating an extended composition (500 tokens)...")
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
-long_piece = m.generate(context, max_new_tokens=500)[0].tolist()
+long_piece = model.generate(context, max_new_tokens=500)[0].tolist()
 long_music = decode(long_piece)
 
 try:
-    with open('./Transformer/bach_long_composition.txt', 'w') as f:
+    with open('../generated/bach_long_composition.txt', 'w') as f:
         f.write(long_music)
-    print(f"✅ Extended composition saved to './Transformer/bach_long_composition.txt'")
+    print(f"Extended composition saved to '../generated/bach_long_composition.txt'")
 except:
     with open('bach_long_composition.txt', 'w') as f:
         f.write(long_music)
-    print(f"✅ Extended composition saved to 'bach_long_composition.txt'")
+    print(f"Extended composition saved to 'bach_long_composition.txt'")

@@ -364,7 +364,7 @@ def main():
     # Look for your specific file first
     target_file = 'simple_generated_music.txt'
     possible_locations = [
-        f'./Transformer/{target_file}',
+        f'../generated/{target_file}',
         target_file,
         f'./{target_file}'
     ]
@@ -449,10 +449,10 @@ def main():
     # Also check for other generated files
     print(f"\n🔍 Looking for other generated music files...")
     other_files = [
-        './Transformer/generated_bach_50_tokens.txt',
-        './Transformer/generated_bach_100_tokens.txt', 
-        './Transformer/generated_bach_200_tokens.txt',
-        './Transformer/bach_long_composition.txt',
+        '../generated/generated_bach_50_tokens.txt',
+        '../generated/generated_bach_100_tokens.txt', 
+        '../generated/generated_bach_200_tokens.txt',
+        '../generated/bach_long_composition.txt',
         'generated_bach_100_tokens.txt'
     ]
     
