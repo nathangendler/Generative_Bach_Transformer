@@ -7,8 +7,8 @@ from tqdm import tqdm
 # Training parameters
 batch_size = 64 
 block_size = 256 
-epochs = 3  # Changed from max_iters to epochs
-eval_interval = 5  # Evaluate every 5 epochs
+epochs = 50  
+eval_interval = 1  # Changed to 1 to evaluate after every epoch
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
@@ -232,10 +232,9 @@ print(f"Model parameters: {total_params/1e6:.1f}M")
 
 best_val_loss = float('inf')
 patience_counter = 0
-patience = 10 
+patience = 5 
 train_loss_history = []
 val_loss_history = []
-print(epochs)
 print("\nStarting training")
 
 for epoch in range(epochs):
@@ -264,71 +263,92 @@ for epoch in range(epochs):
     avg_train_loss = epoch_train_loss / num_train_batches
     train_loss_history.append(avg_train_loss)
     
-    if (epoch + 1) % eval_interval == 0 or epoch == epochs - 1:
-        val_loss = validate_model(model, val_dataloader, device)
-        val_loss_history.append(val_loss)
-        current_lr = scheduler.get_last_lr()[0]
-        
-        print(f"\nEpoch {epoch+1}/{epochs}")
-        print(f"Train Loss: {avg_train_loss:.6f} | Val Loss: {val_loss:.6f}")
-        print(f"Learning Rate: {current_lr:.2e}")
-        
-        if torch.cuda.is_available():
-            memory_used = torch.cuda.memory_allocated() / 1e6
-            memory_cached = torch.cuda.memory_reserved() / 1e6
-            print(f"GPU Memory: {memory_used:.1f}MB used, {memory_cached:.1f}MB cached")
-        
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            patience_counter = 0
+    val_loss = validate_model(model, val_dataloader, device)
+    val_loss_history.append(val_loss)
+    current_lr = scheduler.get_last_lr()[0]
+    
+    print(f"\nEpoch {epoch+1}/{epochs}")
+    print(f"Train Loss: {avg_train_loss:.6f} | Val Loss: {val_loss:.6f}")
+    print(f"Learning Rate: {current_lr:.2e}")
+    
+    if torch.cuda.is_available():
+        memory_used = torch.cuda.memory_allocated() / 1e6
+        memory_cached = torch.cuda.memory_reserved() / 1e6
+    
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        patience_counter = 0
+        try:
+            torch.save(model.state_dict(), '../models/bach_model.pth')
+        except:
             try:
-                torch.save(model.state_dict(), '../models/bach_model.pth')
-                print("✓ Best model saved")
-            except:
                 torch.save(model.state_dict(), 'models/bach_model.pth')
-                print("✓ Best model saved")
-        else:
-            patience_counter += 1
-            print(f"No improvement for {patience_counter}/{patience} epochs")
-            if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch+1}")
-                break
+            except:
+                torch.save(model.state_dict(), 'bach_model.pth')
+    else:
+        patience_counter += 1
+        print(f"No improvement for {patience_counter}/{patience} epochs")
         
+        if patience_counter >= patience:
+            print(f"\nEarly stopping triggered at epoch {epoch+1}")
+            print(f"Best validation loss achieved: {best_val_loss:.6f}")
+            try:
+                torch.save(model.state_dict(), '../models/bach_model_final.pth')
+            except:
+                try:
+                    torch.save(model.state_dict(), 'models/bach_model_final.pth')
+                except:
+                    torch.save(model.state_dict(), 'bach_model_final.pth')
+            break
+        
+    # Clear GPU cache periodically
     if torch.cuda.is_available() and epoch % 10 == 0:
         torch.cuda.empty_cache()
 
-print(f"Total epochs trained: {len(train_loss_history)}")
+print(f"\nTraining Summary:")
+print(f"Total epochs completed: {len(train_loss_history)}")
 print(f"Best validation loss: {best_val_loss:.6f}")
+print(f"Final training loss: {train_loss_history[-1]:.6f}")
 
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
 
+# Load the best model for generation
 try:
     model.load_state_dict(torch.load('../models/bach_model.pth'))
 except:
-    model.load_state_dict(torch.load('models/bach_model.pth'))
+    try:
+        model.load_state_dict(torch.load('models/bach_model.pth'))
+    except:
+        model.load_state_dict(torch.load('bach_model.pth'))
 
 model.eval()
 
-
-print(f"\nGenerating sequence")
+print(f"\nGenerating music sequence")
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 generated_tokens = model.generate(context, max_new_tokens=200)[0].tolist()
 generated_music = decode(generated_tokens)
-
 
 try:
     with open('/generated/generated_music.txt', 'w') as f:
         f.write(generated_music)
 except:
-    with open('generated_music.txt', 'w') as f:
-        f.write(generated_music)
+    try:
+        with open('generated/generated_music.txt', 'w') as f:
+            f.write(generated_music)
+    except:
+        with open('generated_music.txt', 'w') as f:
+            f.write(generated_music)
 
 try:
     torch.save(model.state_dict(), '/models/bach_gpt_model.pth')
 except:
-    torch.save(model.state_dict(), 'bach_gpt_model.pth')
-
+    try:
+        torch.save(model.state_dict(), 'models/bach_gpt_model.pth')
+    except:
+        torch.save(model.state_dict(), 'bach_gpt_model.pth')
 
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
+
+print("\nTraining completed successfully!")
